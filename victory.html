@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Victory</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    html,body { height:100%; margin:0; font-family:Segoe UI,system-ui,Arial,sans-serif; }
+    .full {
+      position:relative;
+      width:100%;
+      height:100%;
+      overflow:hidden;
+      background:#000;
+      color:white;
+    }
+    .bg-video {
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      z-index:1;
+      filter:brightness(0.45);
+    }
+    .overlay {
+      position:relative;
+      z-index:2;
+      height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+    }
+    .card {
+      background:rgba(0,0,0,0.45);
+      padding:28px;
+      border-radius:12px;
+      text-align:center;
+      max-width:900px;
+      width:90%;
+    }
+    h1 { font-size:2.4rem; margin-bottom:10px; letter-spacing:1px; }
+    p { font-size:1.1rem; margin:8px 0 16px 0; }
+    .winners { font-weight:700; font-size:1.05rem; margin-bottom:16px; color:#f1f1f1; }
+    .ready-list { margin-top:12px; font-size:0.95rem; color:#e7e7e7; }
+    .btn {
+      display:inline-block;
+      background:#27ae60;
+      color:white;
+      padding:12px 22px;
+      border-radius:8px;
+      border:none;
+      cursor:pointer;
+      font-size:1rem;
+    }
+    .btn:disabled { background:#7f8c8d; cursor:not-allowed; }
+    .small { font-size:0.9rem; color:#ddd; margin-top:8px; }
+    @media (max-width:600px) {
+      h1 { font-size:1.6rem; }
+      .card { padding:18px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="full">
+    <video id="victoryVideo" class="bg-video" autoplay muted loop playsinline>
+      <source id="victoryVideoSource" src="" type="video/mp4">
+      Your browser does not support HTML5 video.
+    </video>
+
+    <div class="overlay">
+      <div class="card">
+        <h1 id="title">TEAM WAS VICTORIOUS!</h1>
+        <p id="subtitle">Celebration message</p>
+        <div class="winners" id="winners">Winners: ...</div>
+
+        <button class="btn" id="readyBtn">Start New Game</button>
+        <div class="small" id="youStatus"></div>
+
+        <div class="ready-list" id="readyList" style="display:none;">
+          Waiting for players...<br>
+          <span id="readyNames"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Parse query params
+    function qs() {
+      const params = {};
+      const parts = (location.search || '').replace(/^\?/, '').split('&').filter(Boolean);
+      parts.forEach(p => {
+        const [k, v] = p.split('=');
+        params[decodeURIComponent(k)] = v ? decodeURIComponent(v) : '';
+      });
+      return params;
+    }
+
+    const params = qs();
+    const reason = (params.reason || '').toLowerCase(); // 'foundall' or 'assassin'
+    const winnerTeam = (params.winner || '').toLowerCase(); // 'red' or 'blue'
+    const winnersParam = params.winners || ''; // comma separated names
+
+    const victoryVideo = document.getElementById('victoryVideo');
+    const videoSource = document.getElementById('victoryVideoSource');
+    const titleEl = document.getElementById('title');
+    const subtitleEl = document.getElementById('subtitle');
+    const winnersEl = document.getElementById('winners');
+    const readyBtn = document.getElementById('readyBtn');
+    const readyListDiv = document.getElementById('readyList');
+    const readyNamesSpan = document.getElementById('readyNames');
+    const youStatus = document.getElementById('youStatus');
+
+    // NEW: separate video files for red/blue success plus assassin case
+    const RED_FOUND_VIDEO  = '/videos/victory_red_found_all.mp4';
+    const BLUE_FOUND_VIDEO = '/videos/victory_blue_found_all.mp4';
+    const ASSASSIN_VIDEO   = '/videos/victory_assassin.mp4';
+
+    // Pick video and subtitle based on reason and winning team
+    if (reason === 'assassin') {
+      videoSource.src = ASSASSIN_VIDEO;
+      // subtitle for assassin: show which team won and who was killed
+      subtitleEl.textContent = `${winnerTeam.toUpperCase()} TEAM WAS VICTORIOUS! ${winnerTeam === 'blue' ? 'RED Team was killed by the Assassin' : 'BLUE Team was killed by the Assassin'}`;
+    } else if (reason === 'foundall' || reason === 'foundall'.toLowerCase()) {
+      // success - pick red or blue variant
+      if (winnerTeam === 'red') {
+        videoSource.src = RED_FOUND_VIDEO;
+      } else if (winnerTeam === 'blue') {
+        videoSource.src = BLUE_FOUND_VIDEO;
+      } else {
+        // fallback if winnerTeam missing
+        videoSource.src = BLUE_FOUND_VIDEO;
+      }
+      subtitleEl.textContent = 'All words were found!';
+    } else {
+      // safe fallback
+      videoSource.src = BLUE_FOUND_VIDEO;
+      subtitleEl.textContent = '';
+    }
+
+    // Title and winners
+    titleEl.textContent = `${(winnerTeam || 'TEAM').toUpperCase()} TEAM WAS VICTORIOUS!`;
+    const winnersNames = winnersParam ? winnersParam.split(',').filter(Boolean) : [];
+    winnersEl.textContent = 'Winners: ' + (winnersNames.length ? winnersNames.join(', ') : 'Unknown');
+
+    // Load video
+    victoryVideo.load();
+
+    // Socket handling to coordinate ready-state for new game
+    const socket = io();
+    let amReady = false;
+    let playersState = [];
+
+    // Rejoin the server with stored name/team so server knows this socket is a player
+    const storedName = localStorage.getItem('codenames_playerName') || '';
+    const storedTeam = localStorage.getItem('codenames_playerTeam') || null;
+
+    socket.on('connect', () => {
+      // Immediately re-register this socket as the same player (if we have saved data)
+      if (storedName) {
+        socket.emit('rejoin', { name: storedName, team: storedTeam });
+      }
+    });
+
+    readyBtn.addEventListener('click', () => {
+      if (amReady) return;
+      amReady = true;
+      readyBtn.disabled = true;
+      socket.emit('playerReadyNewGame');
+      youStatus.textContent = 'You are ready. Waiting for others...';
+      readyListDiv.style.display = 'block';
+    });
+
+    // Update ready list whenever playerUpdate or gameState events arrive
+    function updateReadyList(players) {
+      playersState = players || [];
+      const readyNames = playersState.filter(p => p.readyNewGame).map(p => p.name);
+      if (readyNames.length === 0) {
+        readyNamesSpan.textContent = 'No players ready yet';
+      } else {
+        readyNamesSpan.textContent = readyNames.join(', ');
+      }
+      // Show the list area when someone clicked ready or there's at least one ready
+      readyListDiv.style.display = (readyNames.length > 0 || amReady) ? 'block' : 'none';
+    }
+
+    socket.on('playerUpdate', (players) => {
+      updateReadyList(players);
+    });
+
+    socket.on('gameState', (state) => {
+      if (state && state.players) updateReadyList(state.players);
+
+      // When server starts a new game (gameStarted true and not gameOver), navigate back to index.html
+      if (state && state.gameStarted && !state.gameOver) {
+        // clear stored request state so user returns cleanly
+        localStorage.removeItem('codenames_playerTeam'); // optional: team will be returned from server after reconnect
+        window.location.href = '/';
+      }
+    });
+  </script>
+</body>
+</html>

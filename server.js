@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 // Serve static files
 app.use(express.static(__dirname));
 
-// Word bank for the game
+// Word bank for the game (unchanged)
 const WORD_BANK = [
   'AFRICA', 'AGENT', 'AIR', 'ALIEN', 'ALPS', 'AMAZON', 'AMBULANCE', 'AMERICA', 'ANGEL', 'ANTARCTICA',
   'APPLE', 'ARM', 'ATLANTIS', 'AUSTRALIA', 'AZTEC', 'BACK', 'BALL', 'BAND', 'BANK', 'BAR',
@@ -71,7 +71,9 @@ let gameState = {
   gameStarted: false,
   gameOver: false,
   winner: null,
-  winReason: null
+  winReason: null,
+  // pendingGuesses: { wordIndex: [socketId,...] }
+  pendingGuesses: {}
 };
 
 // Helper function to shuffle array
@@ -112,6 +114,7 @@ function initializeGame() {
   gameState.gameOver = false;
   gameState.winner = null;
   gameState.winReason = null;
+  gameState.pendingGuesses = {};
 }
 
 // Get public game state (hides word types from operatives)
@@ -119,12 +122,21 @@ function getPublicGameState(socketId) {
   const player = gameState.players[socketId];
   const isSpymaster = player && player.spymaster;
 
+  // Build pendingConfirmations: map word index -> array of player names
+  const pendingConfirmations = {};
+  Object.keys(gameState.pendingGuesses).forEach(k => {
+    const ids = gameState.pendingGuesses[k] || [];
+    pendingConfirmations[k] = ids.map(id => (gameState.players[id] ? gameState.players[id].name : 'Unknown'));
+  });
+
   return {
     players: Object.values(gameState.players),
-    words: gameState.words.map(w => ({
+    words: gameState.words.map((w, idx) => ({
       word: w.word,
       type: (isSpymaster || w.revealed) ? w.type : 'hidden',
-      revealed: w.revealed
+      revealed: w.revealed,
+      // expose pending confirmation names for display
+      pendingConfirmations: pendingConfirmations[idx] || []
     })),
     redTeam: gameState.redTeam,
     blueTeam: gameState.blueTeam,
@@ -151,13 +163,80 @@ function autoAssignTeamForNewPlayer(socketId) {
   return redCount <= blueCount ? 'red' : 'blue';
 }
 
+function addToTeamArray(socketId, team) {
+  if (team === 'red') {
+    if (!gameState.redTeam.includes(socketId)) gameState.redTeam.push(socketId);
+  } else if (team === 'blue') {
+    if (!gameState.blueTeam.includes(socketId)) gameState.blueTeam.push(socketId);
+  }
+}
+
+function removeFromTeamArray(socketId, team) {
+  if (team === 'red') {
+    gameState.redTeam = gameState.redTeam.filter(id => id !== socketId);
+  } else if (team === 'blue') {
+    gameState.blueTeam = gameState.blueTeam.filter(id => id !== socketId);
+  }
+}
+
+// Remove a player's pending confirmations from all pending lists
+function removePendingForPlayer(socketId) {
+  Object.keys(gameState.pendingGuesses).forEach(k => {
+    gameState.pendingGuesses[k] = (gameState.pendingGuesses[k] || []).filter(id => id !== socketId);
+    if (!gameState.pendingGuesses[k] || gameState.pendingGuesses[k].length === 0) {
+      delete gameState.pendingGuesses[k];
+    }
+  });
+}
+
+// Execute the actual guess resolution (same logic as original guess handler)
+function resolveGuess(wordIndex) {
+  // Safety checks
+  if (!gameState.words[wordIndex] || gameState.words[wordIndex].revealed) return;
+
+  const word = gameState.words[wordIndex];
+  word.revealed = true;
+  gameState.guessesRemaining = Math.max(0, gameState.guessesRemaining - 1); // consume one guess
+
+  if (word.type === 'red') {
+    gameState.redScore++;
+  } else if (word.type === 'blue') {
+    gameState.blueScore++;
+  }
+
+  // Check for game over
+  if (word.type === 'assassin') {
+    gameState.gameOver = true;
+    // winner is the opposite team
+    gameState.winner = gameState.currentTeam === 'red' ? 'blue' : 'red';
+    gameState.winReason = 'assassin';
+  } else if (gameState.redScore === gameState.redTotal) {
+    gameState.gameOver = true;
+    gameState.winner = 'red';
+    gameState.winReason = 'foundAll';
+  } else if (gameState.blueScore === gameState.blueTotal) {
+    gameState.gameOver = true;
+    gameState.winner = 'blue';
+    gameState.winReason = 'foundAll';
+  }
+
+  // If wrong team or neutral or out of guesses, switch teams
+  if (word.type !== gameState.currentTeam || gameState.guessesRemaining === 0) {
+    gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
+    gameState.guessesRemaining = 0;
+    gameState.currentClue = null;
+  }
+
+  // Clear all pending guesses (safe: after a resolved guess, other pending proposals should be dropped)
+  gameState.pendingGuesses = {};
+}
+
 // Socket.io connection handling
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  // Add player
+  // Add player (initial join)
   socket.on('join', (playerName) => {
-    // Auto-assign team to keep teams even as players join
     const assignedTeam = autoAssignTeamForNewPlayer(socket.id);
 
     gameState.players[socket.id] = {
@@ -168,35 +247,59 @@ io.on('connection', (socket) => {
       readyNewGame: false
     };
 
-    if (assignedTeam === 'red') {
-      gameState.redTeam.push(socket.id);
-    } else if (assignedTeam === 'blue') {
-      gameState.blueTeam.push(socket.id);
-    }
+    addToTeamArray(socket.id, assignedTeam);
+    socket.join(`team:${assignedTeam}`);
 
-    // Notify all clients about the updated player list and the joining player of the game state
     io.emit('playerUpdate', Object.values(gameState.players));
     socket.emit('gameState', getPublicGameState(socket.id));
   });
 
-  // Join team
+  // Rejoin after redirect (victory page) or reconnect: register socket with provided name/team
+  socket.on('rejoin', ({ name, team }) => {
+    // Remove old entries matching this name (stale sockets)
+    Object.keys(gameState.players).forEach(pid => {
+      const p = gameState.players[pid];
+      if (p && p.name === name && pid !== socket.id) {
+        // Clean up stale
+        removeFromTeamArray(pid, p.team);
+        delete gameState.players[pid];
+      }
+    });
+
+    gameState.players[socket.id] = {
+      id: socket.id,
+      name: name || `Player-${socket.id.slice(0,6)}`,
+      team: team || null,
+      spymaster: false,
+      readyNewGame: false
+    };
+
+    if (team === 'red' || team === 'blue') {
+      addToTeamArray(socket.id, team);
+      socket.join(`team:${team}`);
+    }
+
+    io.emit('playerUpdate', Object.values(gameState.players));
+    socket.emit('gameState', getPublicGameState(socket.id));
+  });
+
+  // Join team (manual)
   socket.on('joinTeam', (team) => {
     const player = gameState.players[socket.id];
     if (!player) return;
 
-    // Reset readyNewGame when changing teams
+    // Reset ready flag and remove pending confirmations for this player
     player.readyNewGame = false;
+    removePendingForPlayer(socket.id);
 
-    // Remove from old team
-    if (player.team === 'red') {
-      gameState.redTeam = gameState.redTeam.filter(id => id !== socket.id);
-      if (gameState.redSpymaster === socket.id) {
+    // Leave old team room and array
+    if (player.team) {
+      socket.leave(`team:${player.team}`);
+      removeFromTeamArray(socket.id, player.team);
+      if (player.team === 'red' && gameState.redSpymaster === socket.id) {
         gameState.redSpymaster = null;
         player.spymaster = false;
-      }
-    } else if (player.team === 'blue') {
-      gameState.blueTeam = gameState.blueTeam.filter(id => id !== socket.id);
-      if (gameState.blueSpymaster === socket.id) {
+      } else if (player.team === 'blue' && gameState.blueSpymaster === socket.id) {
         gameState.blueSpymaster = null;
         player.spymaster = false;
       }
@@ -204,11 +307,8 @@ io.on('connection', (socket) => {
 
     // Add to new team
     player.team = team;
-    if (team === 'red') {
-      gameState.redTeam.push(socket.id);
-    } else if (team === 'blue') {
-      gameState.blueTeam.push(socket.id);
-    }
+    addToTeamArray(socket.id, team);
+    socket.join(`team:${team}`);
 
     io.emit('playerUpdate', Object.values(gameState.players));
     io.emit('gameState', getPublicGameState(socket.id));
@@ -228,8 +328,22 @@ io.on('connection', (socket) => {
     }
 
     io.emit('playerUpdate', Object.values(gameState.players));
-    // Send updated game state to the spymaster so they can see all cards
     io.to(socket.id).emit('gameState', getPublicGameState(socket.id));
+  });
+
+  // Team chat
+  socket.on('teamMessage', (text) => {
+    const player = gameState.players[socket.id];
+    if (!player || !player.team) return;
+    // Only non-spymaster teammates should be sending messages in practice; no strict enforcement server-side
+    const message = {
+      from: player.name,
+      text: String(text).slice(0, 1000),
+      time: Date.now(),
+      team: player.team
+    };
+    // Emit only to that team room
+    io.to(`team:${player.team}`).emit('teamMessage', message);
   });
 
   // Player indicates they are ready to start a new game
@@ -275,7 +389,7 @@ io.on('connection', (socket) => {
       });
 
       initializeGame();
-      
+
       // Send personalized game state to each player
       Object.keys(gameState.players).forEach(playerId => {
         io.to(playerId).emit('gameState', getPublicGameState(playerId));
@@ -283,7 +397,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Give clue (spymaster only)
+  // Give clue (spymaster only) - unchanged
   socket.on('giveClue', ({ word, number }) => {
     const player = gameState.players[socket.id];
     if (!player || !player.spymaster || player.team !== gameState.currentTeam) return;
@@ -293,51 +407,78 @@ io.on('connection', (socket) => {
     gameState.guessesRemaining = parseInt(number) + 1; // +1 for bonus guess
 
     io.emit('clueGiven', { word, number, team: gameState.currentTeam });
-    
+
     Object.keys(gameState.players).forEach(playerId => {
       io.to(playerId).emit('gameState', getPublicGameState(playerId));
     });
   });
 
-  // Make guess (operative only)
+  // Proposed guess (confirmation flow). Non-spymaster operatives call this when they click a word.
+  socket.on('proposeGuess', (wordIndex) => {
+    const player = gameState.players[socket.id];
+    if (!player || player.spymaster) return;
+    if (player.team !== gameState.currentTeam) return;
+    if (!gameState.gameStarted || gameState.gameOver) return;
+    if (!gameState.words[wordIndex] || gameState.words[wordIndex].revealed) return;
+
+    // Count non-spymaster players on current team
+    const nonSpymPlayers = Object.values(gameState.players).filter(p => p.team === player.team && !p.spymaster);
+    const nonSpymCount = nonSpymPlayers.length;
+
+    // If 1 or less non-spym players, resolve immediately (backwards-compatible)
+    if (nonSpymCount <= 1) {
+      // treat as immediate guess (consume one guess)
+      resolveGuess(wordIndex);
+
+      // Broadcast updated state
+      Object.keys(gameState.players).forEach(playerId => {
+        io.to(playerId).emit('gameState', getPublicGameState(playerId));
+      });
+      return;
+    }
+
+    // Multi-player confirmation flow:
+    // Ensure player's previous pending entries are removed so they only confirm one candidate at a time
+    removePendingForPlayer(socket.id);
+
+    // Add to pending for this word
+    const key = String(wordIndex);
+    gameState.pendingGuesses[key] = gameState.pendingGuesses[key] || [];
+    if (!gameState.pendingGuesses[key].includes(socket.id)) {
+      gameState.pendingGuesses[key].push(socket.id);
+    }
+
+    // Broadcast updated state so names show up on the square
+    Object.keys(gameState.players).forEach(playerId => {
+      io.to(playerId).emit('gameState', getPublicGameState(playerId));
+    });
+
+    // If everyone (all non spymaster teammates) has confirmed on this word, resolve it
+    const pendingCount = gameState.pendingGuesses[key].filter(id => {
+      const p = gameState.players[id];
+      return p && p.team === player.team && !p.spymaster;
+    }).length;
+
+    if (pendingCount >= nonSpymCount) {
+      // All non-spymaster teammates have clicked -> finalize guess
+      resolveGuess(wordIndex);
+
+      // Broadcast updated state after resolution
+      Object.keys(gameState.players).forEach(playerId => {
+        io.to(playerId).emit('gameState', getPublicGameState(playerId));
+      });
+    }
+  });
+
+  // Make guess legacy (operative only) - kept for backwards compatibility but now not used when team >2
   socket.on('guess', (wordIndex) => {
     const player = gameState.players[socket.id];
     if (!player || player.spymaster || player.team !== gameState.currentTeam) return;
     if (gameState.guessesRemaining <= 0) return;
     if (gameState.words[wordIndex].revealed) return;
 
-    const word = gameState.words[wordIndex];
-    word.revealed = true;
-    gameState.guessesRemaining--;
-
-    // Update scores
-    if (word.type === 'red') {
-      gameState.redScore++;
-    } else if (word.type === 'blue') {
-      gameState.blueScore++;
-    }
-
-    // Check for game over
-    if (word.type === 'assassin') {
-      gameState.gameOver = true;
-      gameState.winner = gameState.currentTeam === 'red' ? 'blue' : 'red';
-      gameState.winReason = 'assassin';
-    } else if (gameState.redScore === gameState.redTotal) {
-      gameState.gameOver = true;
-      gameState.winner = 'red';
-      gameState.winReason = 'foundAll';
-    } else if (gameState.blueScore === gameState.blueTotal) {
-      gameState.gameOver = true;
-      gameState.winner = 'blue';
-      gameState.winReason = 'foundAll';
-    }
-
-    // If wrong team or neutral or out of guesses, switch teams
-    if (word.type !== gameState.currentTeam || gameState.guessesRemaining === 0) {
-      gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
-      gameState.guessesRemaining = 0;
-      gameState.currentClue = null;
-    }
+    // Resolve as immediate guess
+    resolveGuess(wordIndex);
 
     Object.keys(gameState.players).forEach(playerId => {
       io.to(playerId).emit('gameState', getPublicGameState(playerId));
@@ -352,6 +493,8 @@ io.on('connection', (socket) => {
     gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
     gameState.guessesRemaining = 0;
     gameState.currentClue = null;
+    // Clear pending confirmations when turn ends
+    gameState.pendingGuesses = {};
 
     Object.keys(gameState.players).forEach(playerId => {
       io.to(playerId).emit('gameState', getPublicGameState(playerId));
@@ -367,9 +510,9 @@ io.on('connection', (socket) => {
     });
     gameState.redSpymaster = null;
     gameState.blueSpymaster = null;
-    
+
     initializeGame();
-    
+
     io.emit('playerUpdate', Object.values(gameState.players));
     Object.keys(gameState.players).forEach(playerId => {
       io.to(playerId).emit('gameState', getPublicGameState(playerId));
@@ -379,10 +522,10 @@ io.on('connection', (socket) => {
   // Disconnect
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
-    
+
     const player = gameState.players[socket.id];
     if (player) {
-      // Remove from team
+      // Remove from team arrays and room
       if (player.team === 'red') {
         gameState.redTeam = gameState.redTeam.filter(id => id !== socket.id);
         if (gameState.redSpymaster === socket.id) {
@@ -394,10 +537,13 @@ io.on('connection', (socket) => {
           gameState.blueSpymaster = null;
         }
       }
-      
+
+      // Remove any pending confirmations from this player
+      removePendingForPlayer(socket.id);
+
       delete gameState.players[socket.id];
     }
-    
+
     io.emit('playerUpdate', Object.values(gameState.players));
   });
 });
