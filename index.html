@@ -11,9 +11,7 @@
         .container { max-width:1600px; margin:0 auto; height:100%; display:flex; flex-direction:column; }
         h1 { text-align:center; color:white; margin:5px 0 10px; font-size:2em; text-shadow:2px 2px 4px rgba(0,0,0,0.3); }
 
-        /* Layout */
         .game-layout { display:grid; grid-template-columns: 300px 1fr 300px; gap:10px; height:100%; }
-
         .panel { background:white; border-radius:10px; padding:12px; box-shadow:0 5px 15px rgba(0,0,0,0.2); overflow:auto; display:flex; flex-direction:column; }
         .panel h3 { margin-bottom:8px; font-size:1.05em; color:#333; border-bottom:2px solid #eee; padding-bottom:8px; }
 
@@ -35,7 +33,6 @@
         .start-button { width:100%; padding:10px; background:#27ae60; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; }
 
         .board-container { background:white; border-radius:10px; padding:12px; box-shadow:0 5px 15px rgba(0,0,0,0.2); display:flex; flex-direction:column; }
-
         .game-info { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:10px; background:#f8f9fa; border-radius:8px; }
         .turn-indicator.red { color:#e74c3c; font-weight:bold; }
         .turn-indicator.blue { color:#3498db; font-weight:bold; }
@@ -48,13 +45,13 @@
         .clue-display { text-align:center; padding:10px; background:#fff3cd; border-radius:6px; margin-bottom:10px; font-weight:bold; }
 
         .word-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:10px; }
-        .word-card { position:relative; aspect-ratio:1.2; display:flex; align-items:center; justify-content:center; background:#f0f0f0; border:2px solid #ddd; border-radius:8px; cursor:pointer; font-weight:bold; text-align:center; padding:6px; min-height:60px; }
-        .word-card.revealed.red { background:#e74c3c; color:white; border-color:#c0392b; }
-        .word-card.revealed.blue { background:#3498db; color:white; border-color:#2980b9; }
-        .word-card.revealed.neutral { background:#95a5a6; color:white; border-color:#7f8c8d; }
-        .word-card.revealed.assassin { background:#2c3e50; color:white; border-color:#1a252f; }
+        .word-card { position:relative; aspect-ratio:1.2; display:flex; align-items:center; justify-content:center; background:#f0f0f0; border:2px solid #ddd; border-radius:8px; cursor:pointer; font-weight:bold; text-align:center; padding:6px; min-height:60px; user-select:none; }
+        .word-card.revealed.red, .word-card.spymaster-red { background:#e74c3c; color:white; border-color:#c0392b; }
+        .word-card.revealed.blue, .word-card.spymaster-blue { background:#3498db; color:white; border-color:#2980b9; }
+        .word-card.revealed.neutral, .word-card.spymaster-neutral { background:#95a5a6; color:white; border-color:#7f8c8d; }
+        .word-card.revealed.assassin, .word-card.spymaster-assassin { background:#2c3e50; color:white; border-color:#1a252f; }
 
-        .pending-names { position:absolute; bottom:4px; left:4px; right:4px; font-size:0.6em; color:#222; background:rgba(255,255,255,0.8); padding:2px 4px; border-radius:4px; text-align:center; }
+        .pending-names { position:absolute; bottom:4px; left:4px; right:4px; font-size:0.6em; color:#222; background:rgba(255,255,255,0.85); padding:2px 4px; border-radius:4px; text-align:center; }
         .pending-count { position:absolute; top:4px; right:6px; font-size:0.65em; color:#222; background:rgba(255,255,255,0.9); padding:2px 6px; border-radius:6px; }
 
         .chat { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
@@ -64,6 +61,19 @@
         .chat-input button { padding:8px 12px; border-radius:6px; border:none; background:#3498db; color:white; cursor:pointer; }
 
         .new-game-button { width:100%; padding:8px; background:#9b59b6; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; }
+
+        /* Timer Box & Timeout Overlay */
+        .timer-box { margin-top: 14px; padding: 14px; border-radius: 10px; text-align: center; background: #f8f9fa; border: 3px solid #ddd; transition: all 0.3s ease; }
+        .timer-box.red { border-color: #e74c3c; background: #fdf2f2; }
+        .timer-box.blue { border-color: #3498db; background: #f0f8ff; }
+        .timer-phase { font-size: 0.85em; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; color: #444; margin-bottom: 4px; }
+        .timer-digits { font-size: 2.8em; font-weight: 800; font-variant-numeric: tabular-nums; color: #2c3e50; line-height: 1.1; }
+        .timer-digits.urgent { color: #c0392b; animation: pulseUrgent 0.6s infinite alternate; }
+        @keyframes pulseUrgent { from { transform: scale(1); } to { transform: scale(1.08); } }
+
+        #timeoutOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; pointer-events: none; }
+        .strike-xes { font-size: 8rem; font-weight: 900; color: #ff2a2a; letter-spacing: 24px; text-shadow: 0 0 35px rgba(255, 0, 0, 0.9); line-height: 1; }
+        .strike-text { font-size: 2.4rem; font-weight: 800; color: white; margin-top: 18px; text-transform: uppercase; letter-spacing: 2px; text-align: center; }
 
         @media (max-width:1200px) {
             .game-layout { grid-template-columns: 1fr; }
@@ -84,7 +94,7 @@
 
         <!-- Game Screen -->
         <div id="gameScreen" style="display:none;" class="game-layout">
-            <!-- Left Panel: Red team + red chat -->
+            <!-- Left Panel: Red team + red chat + timer -->
             <div class="panel">
                 <h3>Red Team</h3>
 
@@ -111,6 +121,13 @@
 
                 <div style="margin-top:10px;">
                     <button class="start-button" id="startButton" onclick="startGame()">Start Game</button>
+                </div>
+
+                <!-- Predominant Turn Timer Box -->
+                <div id="timerBox" class="timer-box" style="display:none;">
+                    <div id="timerPhase" class="timer-phase">SPYMASTER THINKING</div>
+                    <div id="timerDigits" class="timer-digits">01:30</div>
+                    <button id="muteToggleBtn" onclick="toggleTimerAudio()" style="margin-top:8px; padding:4px 10px; font-size:0.75em; border:1px solid #ccc; border-radius:4px; background:white; cursor:pointer;">🔊 Sound On</button>
                 </div>
             </div>
 
@@ -197,16 +214,92 @@
             </div>
         </div>
     </div>
+
+    <!-- Family Feud Style Timeout Overlay -->
+    <div id="timeoutOverlay">
+        <div class="strike-xes">X X X</div>
+        <div id="strikeText" class="strike-text">TIME'S UP! OTHER TEAM'S TURN</div>
+    </div>
     <script>
-        // Client-side socket and UI logic
         const socket = io();
         let myPlayer = null;
         let currentGameState = null;
         let requestedNewGame = false;
         let redirectedToVictory = false;
 
-        // ---- DEBUG HELPERS ----
-        // show join errors to user
+        // ---- TIMER AUDIO & OVERLAY ----
+        let timerMuted = false;
+        let audioCtx = null;
+
+        function toggleTimerAudio() {
+            timerMuted = !timerMuted;
+            const btn = document.getElementById('muteToggleBtn');
+            if (btn) btn.textContent = timerMuted ? '🔇 Sound Off' : '🔊 Sound On';
+        }
+
+        function playTickSound(secondsLeft) {
+            if (timerMuted) return;
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = secondsLeft <= 3 ? 980 : 740;
+                gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.12);
+            } catch (e) {}
+        }
+
+        function playFamilyFeudBuzzer() {
+            if (timerMuted) return;
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const now = audioCtx.currentTime;
+                [110, 116.5].forEach(freq => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(freq, now);
+                    gain.gain.setValueAtTime(0.28, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.85);
+                });
+            } catch (e) {}
+        }
+
+        function updateTimerDisplay(data) {
+            const box = document.getElementById('timerBox');
+            const phaseEl = document.getElementById('timerPhase');
+            const digitsEl = document.getElementById('timerDigits');
+            if (!box || !phaseEl || !digitsEl) return;
+
+            box.style.display = 'block';
+            box.className = 'timer-box ' + (data.currentTeam || '');
+            const teamLabel = (data.currentTeam || '').toUpperCase();
+            phaseEl.textContent = data.turnPhase === 'spymaster'
+                ? `${teamLabel} SPYMASTER THINKING`
+                : `${teamLabel} OPERATIVES GUESSING`;
+
+            const mins = Math.floor(data.timeRemaining / 60);
+            const secs = data.timeRemaining % 60;
+            digitsEl.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+            if (data.timeRemaining <= 10 && data.timeRemaining > 0) {
+                digitsEl.classList.add('urgent');
+                playTickSound(data.timeRemaining);
+            } else {
+                digitsEl.classList.remove('urgent');
+            }
+        }
+
+        // ---- UI & JOIN HELPERS ----
         function showJoinError(msg) {
             const el = document.getElementById('joinError');
             if (!el) return;
@@ -214,40 +307,36 @@
             el.style.display = msg ? 'block' : 'none';
         }
 
-        // Join game - explicitly called by the Join Game button
         function joinGame() {
             const nameInput = document.getElementById('playerName');
             const name = nameInput ? nameInput.value.trim() : '';
-            console.log('joinGame clicked, name=', name);
             showJoinError('');
             if (!name) {
                 showJoinError('Please enter a name before joining.');
                 return;
             }
 
-            // disable button to prevent double-click
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+            } catch (e) {}
+
             const joinBtn = document.getElementById('joinBtn');
             if (joinBtn) joinBtn.disabled = true;
 
-            // emit join event
             try {
                 socket.emit('join', name);
             } catch (err) {
-                console.error('socket.emit join failed', err);
                 showJoinError('Network/socket error. Check console.');
                 if (joinBtn) joinBtn.disabled = false;
                 return;
             }
 
-            // persist name for victory-page rejoin only (victory page will rejoin)
             localStorage.setItem('codenames_playerName', name);
-
-            // show UI immediately; server will send updated player list/game state shortly
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('gameScreen').style.display = 'grid';
         }
 
-        // other UI actions (wrap in functions so they are global)
         function sendTeamMessage(team) {
             const inputId = team === 'red' ? 'redChatInput' : 'blueChatInput';
             const input = document.getElementById(inputId);
@@ -269,7 +358,6 @@
             document.getElementById('clueWord').value = '';
         }
         function proposeGuess(index) { socket.emit('proposeGuess', index); }
-        function makeGuess(index) { socket.emit('guess', index); }
         function endTurn() { socket.emit('endTurn'); }
         function startNewGameReady() {
             if (requestedNewGame) return;
@@ -278,21 +366,33 @@
             if (btn) btn.disabled = true;
             socket.emit('playerReadyNewGame');
         }
-
         // ---- SOCKET LISTENERS ----
-
         socket.on('connect', () => {
             console.log('socket connected', socket.id);
-            // IMPORTANT: do NOT auto-emit 'rejoin' here from index.html.
-            // Victory page will rejoin itself when opened; auto-rejoin here caused players
-            // to appear on teams before clicking Join Game.
-            // If you need rejoin behavior when returning to index, handle it only when on victory.html,
-            // or detect a stored "wasPreviouslyJoined" flag.
         });
 
         socket.on('connect_error', (err) => {
             console.error('socket connect_error', err);
             showJoinError('Socket connection error. See console for details.');
+        });
+
+        socket.on('timerTick', (data) => {
+            updateTimerDisplay(data);
+        });
+
+        socket.on('turnTimeout', (data) => {
+            playFamilyFeudBuzzer();
+            const overlay = document.getElementById('timeoutOverlay');
+            const strikeText = document.getElementById('strikeText');
+            if (strikeText) {
+                strikeText.textContent = `TIME'S UP! ${(data.nextTeam || '').toUpperCase()} TEAM'S TURN`;
+            }
+            if (overlay) {
+                overlay.style.display = 'flex';
+                setTimeout(() => {
+                    overlay.style.display = 'none';
+                }, 2500);
+            }
         });
 
         socket.on('playerUpdate', (players) => {
@@ -316,17 +416,10 @@
                 if (player.id === socket.id) myPlayer = player;
             });
 
-            // Persist myPlayer info for victory page rejoin (only after we've actually joined)
             if (myPlayer) {
                 if (myPlayer.name) localStorage.setItem('codenames_playerName', myPlayer.name);
                 if (myPlayer.team) localStorage.setItem('codenames_playerTeam', myPlayer.team);
             }
-
-            // Update UI state of spymaster button text
-            const spymasterBtn = document.getElementById('spymasterButtonRed');
-            const spymasterBtnBlue = document.getElementById('spymasterButtonBlue');
-            // (if you have single spymaster button, adjust accordingly)
-            // No-op: handled elsewhere in a full build
         });
 
         socket.on('gameState', (state) => {
@@ -336,35 +429,88 @@
                 if (me) myPlayer = me;
             }
 
-            // Show/hide board
-            if (state.gameStarted) {
+            if (state.gameStarted && !state.gameOver) {
                 document.getElementById('gameNotStarted').style.display = 'none';
                 document.getElementById('gameBoard').style.display = 'block';
-                // update indicators and board...
-            } else {
+                document.getElementById('timerBox').style.display = 'block';
+
+                const turnEl = document.getElementById('turnIndicator');
+                turnEl.className = 'turn-indicator ' + state.currentTeam;
+                turnEl.textContent = `${state.currentTeam.toUpperCase()} TEAM'S TURN`;
+
+                document.getElementById('redScore').textContent = `Red: ${state.redScore}/${state.redTotal}`;
+                document.getElementById('blueScore').textContent = `Blue: ${state.blueScore}/${state.blueTotal}`;
+
+                const isMyTurn = myPlayer && myPlayer.team === state.currentTeam;
+                const amSpymaster = myPlayer && myPlayer.spymaster;
+
+                const clueDisplay = document.getElementById('clueDisplay');
+                const clueInput = document.getElementById('clueInput');
+                const endTurnBtn = document.getElementById('endTurnButton');
+
+                if (state.currentClue) {
+                    clueDisplay.style.display = 'block';
+                    clueDisplay.textContent = `Clue: "${state.currentClue.word}" (${state.currentClue.number}) — Guesses left: ${state.guessesRemaining}`;
+                    clueInput.style.display = 'none';
+                    endTurnBtn.style.display = (isMyTurn && !amSpymaster) ? 'block' : 'none';
+                } else {
+                    clueDisplay.style.display = 'none';
+                    clueInput.style.display = (isMyTurn && amSpymaster) ? 'block' : 'none';
+                    endTurnBtn.style.display = 'none';
+                }
+
+                // Render 5x5 Word Grid
+                const grid = document.getElementById('wordGrid');
+                grid.innerHTML = '';
+                (state.words || []).forEach((w, idx) => {
+                    const card = document.createElement('div');
+                    card.className = 'word-card';
+                    if (w.revealed) {
+                        card.classList.add('revealed', w.type);
+                    } else if (amSpymaster && w.type !== 'hidden') {
+                        card.classList.add('spymaster-' + w.type);
+                    }
+                    card.textContent = w.word;
+
+                    if (!w.revealed && w.pendingConfirmations && w.pendingConfirmations.length > 0) {
+                        const countBadge = document.createElement('span');
+                        countBadge.className = 'pending-count';
+                        countBadge.textContent = w.pendingConfirmations.length;
+                        card.appendChild(countBadge);
+
+                        const namesBadge = document.createElement('div');
+                        namesBadge.className = 'pending-names';
+                        namesBadge.textContent = w.pendingConfirmations.join(', ');
+                        card.appendChild(namesBadge);
+                    }
+
+                    if (!w.revealed && isMyTurn && !amSpymaster && state.currentClue) {
+                        card.onclick = () => proposeGuess(idx);
+                    }
+                    grid.appendChild(card);
+                });
+            } else if (!state.gameStarted) {
                 document.getElementById('gameNotStarted').style.display = 'block';
                 document.getElementById('gameBoard').style.display = 'none';
+                document.getElementById('timerBox').style.display = 'none';
             }
 
-            // Handle game over redirect (unchanged)
-            if (state.gameOver && !redirectedToVictory) {
-                redirectedToVictory = true;
-                const winners = (state.players || []).filter(p => p.team === state.winner).map(p => p.name);
-                const winnersParam = encodeURIComponent(winners.join(','));
-                const reason = encodeURIComponent(state.winReason || '');
-                const winnerTeam = encodeURIComponent(state.winner || '');
-                window.location.href = `/victory.html?reason=${reason}&winner=${winnerTeam}&winners=${winnersParam}`;
-            }
-
-            if (!state.gameOver) {
+            if (state.gameOver) {
+                document.getElementById('timerBox').style.display = 'none';
+                if (!redirectedToVictory) {
+                    redirectedToVictory = true;
+                    const winners = (state.players || []).filter(p => p.team === state.winner).map(p => p.name);
+                    const winnersParam = encodeURIComponent(winners.join(','));
+                    const reason = encodeURIComponent(state.winReason || '');
+                    const winnerTeam = encodeURIComponent(state.winner || '');
+                    window.location.href = `/victory.html?reason=${reason}&winner=${winnerTeam}&winners=${winnersParam}`;
+                }
+            } else {
                 redirectedToVictory = false;
                 requestedNewGame = false;
                 const boardBtn = document.getElementById('newGameButton');
                 if (boardBtn) boardBtn.disabled = false;
             }
-
-            // Render words / pending confirmations etc. (left out here for brevity)
-            // The rest of your existing rendering code can stay as before.
         });
 
         socket.on('teamMessage', (msg) => {
@@ -379,16 +525,13 @@
             container.scrollTop = container.scrollHeight;
         });
 
-        // ---- UTILITIES ----
         function escapeHtml(s) {
             return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
 
-        // Enable Enter key handling for convenience
         document.getElementById('playerName').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') joinGame();
         });
-
     </script>
 </body>
 </html>

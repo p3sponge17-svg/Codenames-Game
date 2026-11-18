@@ -5,13 +5,13 @@ const io = require('socket.io')(http);
 
 const PORT = process.env.PORT || 3000;
 
-// Timer settings (seconds) & static file serving
+// Timer settings (seconds) and standard Codenames WORD_BANK array initialization
 const SPYMASTER_TIME = 90;
 const OPERATIVE_TIME = 120;
 let turnTimerInterval = null;
+
 app.use(express.static(__dirname));
 
-// Word bank for the game (includes ~400 standard Codenames terms from AFRICA to YARD)
 const WORD_BANK = [
   'AFRICA', 'AGENT', 'AIR', 'ALIEN', 'ALPS', 'AMAZON', 'AMBULANCE', 'AMERICA', 'ANGEL', 'ANTARCTICA',
   'APPLE', 'ARM', 'ATLANTIS', 'AUSTRALIA', 'AZTEC', 'BACK', 'BALL', 'BAND', 'BANK', 'BAR',
@@ -54,16 +54,31 @@ const WORD_BANK = [
   'UNICORN', 'VACUUM', 'VAN', 'VET', 'WAKE', 'WALL', 'WAR', 'WASHER', 'WASHINGTON', 'WATCH',
   'WATER', 'WAVE', 'WEB', 'WELL', 'WHALE', 'WHIP', 'WIND', 'WITCH', 'WORM', 'YARD'
 ];
-
-// Initial game state structure
+// Game state
 let gameState = {
-  players: {}, words: [], revealed: [], redTeam: [], blueTeam: [],
-  redSpymaster: null, blueSpymaster: null, currentTeam: 'red',
-  currentClue: null, guessesRemaining: 0, redScore: 0, blueScore: 0,
-  redTotal: 9, blueTotal: 8, gameStarted: false, gameOver: false,
-  winner: null, winReason: null, pendingGuesses: {},
-  timeRemaining: SPYMASTER_TIME, turnPhase: 'spymaster'
+  players: {},
+  words: [],
+  revealed: [],
+  redTeam: [],
+  blueTeam: [],
+  redSpymaster: null,
+  blueSpymaster: null,
+  currentTeam: 'red',
+  currentClue: null,
+  guessesRemaining: 0,
+  redScore: 0,
+  blueScore: 0,
+  redTotal: 9,
+  blueTotal: 8,
+  gameStarted: false,
+  gameOver: false,
+  winner: null,
+  winReason: null,
+  pendingGuesses: {},
+  timeRemaining: SPYMASTER_TIME,
+  turnPhase: 'spymaster'
 };
+
 function stopTurnTimer() {
   if (turnTimerInterval) {
     clearInterval(turnTimerInterval);
@@ -120,6 +135,7 @@ function startTurnTimer(phase) {
   }, 1000);
 }
 
+// Helper function to shuffle array
 function shuffle(array) {
   const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
@@ -129,6 +145,7 @@ function shuffle(array) {
   return newArray;
 }
 
+// Initialize a new game
 function initializeGame() {
   const selectedWords = shuffle(WORD_BANK).slice(0, 25);
   const wordTypes = shuffle([
@@ -160,7 +177,7 @@ function initializeGame() {
 
   startTurnTimer('spymaster');
 }
-
+// Get public game state (hides word types from operatives)
 function getPublicGameState(socketId) {
   const player = gameState.players[socketId];
   const isSpymaster = player && player.spymaster;
@@ -199,6 +216,7 @@ function getPublicGameState(socketId) {
   };
 }
 
+// Automatically assign a new player to the smaller team
 function autoAssignTeamForNewPlayer(socketId) {
   const redCount = gameState.redTeam.length;
   const blueCount = gameState.blueTeam.length;
@@ -221,11 +239,14 @@ function removeFromTeamArray(socketId, team) {
   }
 }
 
+// Remove a player's pending confirmations from all pending lists
 function removePendingForPlayer(socketId) {
   Object.keys(gameState.pendingGuesses).forEach(k => {
     gameState.pendingGuesses[k] = (gameState.pendingGuesses[k] || []).filter(id => id !== socketId);
   });
 }
+
+// Helper to resolve a confirmed guess on wordIndex
 function resolveGuess(wordIndex) {
   const word = gameState.words[wordIndex];
   if (!word || word.revealed) return;
@@ -237,15 +258,15 @@ function resolveGuess(wordIndex) {
     gameState.redScore++;
   } else if (word.type === 'blue') {
     gameState.blueScore++;
-  }
-
-  // Stop timer immediately on Victory or Assassin
-  if (word.type === 'assassin') {
+  } else if (word.type === 'assassin') {
     gameState.gameOver = true;
     gameState.winner = gameState.currentTeam === 'red' ? 'blue' : 'red';
     gameState.winReason = 'assassin';
     stopTurnTimer();
-  } else if (gameState.redScore === gameState.redTotal) {
+  }
+
+  // Check if a team found all their words
+  if (gameState.redScore === gameState.redTotal) {
     gameState.gameOver = true;
     gameState.winner = 'red';
     gameState.winReason = 'foundAll';
@@ -257,8 +278,14 @@ function resolveGuess(wordIndex) {
     stopTurnTimer();
   }
 
+  // Determine if turn continues
   if (!gameState.gameOver) {
-    if (word.type === gameState.currentTeam) {
+    if (word.type !== gameState.currentTeam) {
+      gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
+      gameState.guessesRemaining = 0;
+      gameState.currentClue = null;
+      startTurnTimer('spymaster');
+    } else {
       gameState.guessesRemaining--;
       if (gameState.guessesRemaining <= 0) {
         gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
@@ -266,134 +293,220 @@ function resolveGuess(wordIndex) {
         gameState.currentClue = null;
         startTurnTimer('spymaster');
       }
-    } else {
-      gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
-      gameState.guessesRemaining = 0;
-      gameState.currentClue = null;
-      startTurnTimer('spymaster');
     }
   }
 
   gameState.pendingGuesses = {};
 }
-
-function broadcastGameState() {
-  Object.keys(gameState.players).forEach(playerId => {
-    io.to(playerId).emit('gameState', getPublicGameState(playerId));
-  });
-}
-
+// Socket.io connection handling
 io.on('connection', (socket) => {
-  socket.on('join', (name) => {
+  console.log('User connected:', socket.id);
+
+  // Player joins game (auto-assign to smaller team so everyone is on a team immediately)
+  socket.on('join', (playerName) => {
     const team = autoAssignTeamForNewPlayer(socket.id);
     addToTeamArray(socket.id, team);
+
     gameState.players[socket.id] = {
       id: socket.id,
-      name: String(name || 'Player').slice(0, 20),
-      team,
+      name: playerName,
+      team: team,
       spymaster: false,
       readyNewGame: false
     };
+
     io.emit('playerUpdate', Object.values(gameState.players));
     socket.emit('gameState', getPublicGameState(socket.id));
   });
 
+  // Rejoin handler used when returning from victory page
+  socket.on('rejoin', (payload) => {
+    const { name, team } = payload || {};
+    let assignedTeam = team;
+    if (!assignedTeam || (assignedTeam !== 'red' && assignedTeam !== 'blue')) {
+      assignedTeam = autoAssignTeamForNewPlayer(socket.id);
+    }
+
+    Object.keys(gameState.players).forEach(existingId => {
+      const p = gameState.players[existingId];
+      if (p && p.name === name && existingId !== socket.id) {
+        removeFromTeamArray(existingId, p.team);
+        removePendingForPlayer(existingId);
+        if (gameState.redSpymaster === existingId) gameState.redSpymaster = null;
+        if (gameState.blueSpymaster === existingId) gameState.blueSpymaster = null;
+        delete gameState.players[existingId];
+      }
+    });
+
+    addToTeamArray(socket.id, assignedTeam);
+
+    gameState.players[socket.id] = {
+      id: socket.id,
+      name: name || 'Player',
+      team: assignedTeam,
+      spymaster: false,
+      readyNewGame: false
+    };
+
+    io.emit('playerUpdate', Object.values(gameState.players));
+    socket.emit('gameState', getPublicGameState(socket.id));
+  });
+
+  // Player joins a team
   socket.on('joinTeam', (team) => {
     const player = gameState.players[socket.id];
-    if (!player || gameState.gameStarted) return;
-    if (team !== 'red' && team !== 'blue') return;
+    if (!player) return;
 
-    removeFromTeamArray(socket.id, player.team);
-    if (gameState.redSpymaster === socket.id) gameState.redSpymaster = null;
-    if (gameState.blueSpymaster === socket.id) gameState.blueSpymaster = null;
+    if (player.team) {
+      removeFromTeamArray(socket.id, player.team);
+      removePendingForPlayer(socket.id);
+      if (gameState.redSpymaster === socket.id) {
+        gameState.redSpymaster = null;
+        player.spymaster = false;
+      }
+      if (gameState.blueSpymaster === socket.id) {
+        gameState.blueSpymaster = null;
+        player.spymaster = false;
+      }
+    }
 
     player.team = team;
-    player.spymaster = false;
     addToTeamArray(socket.id, team);
 
     io.emit('playerUpdate', Object.values(gameState.players));
-    broadcastGameState();
+    Object.keys(gameState.players).forEach(playerId => {
+      io.to(playerId).emit('gameState', getPublicGameState(playerId));
+    });
   });
 
+  // Player toggles spymaster status
   socket.on('becomeSpymaster', () => {
     const player = gameState.players[socket.id];
-    if (!player || !player.team || gameState.gameStarted) return;
+    if (!player || !player.team) return;
 
-    if (player.team === 'red') {
-      if (gameState.redSpymaster && gameState.redSpymaster !== socket.id) return;
-      gameState.redSpymaster = socket.id;
-      player.spymaster = true;
-    } else if (player.team === 'blue') {
-      if (gameState.blueSpymaster && gameState.blueSpymaster !== socket.id) return;
-      gameState.blueSpymaster = socket.id;
-      player.spymaster = true;
+    if (player.spymaster) {
+      player.spymaster = false;
+      if (player.team === 'red' && gameState.redSpymaster === socket.id) {
+        gameState.redSpymaster = null;
+      } else if (player.team === 'blue' && gameState.blueSpymaster === socket.id) {
+        gameState.blueSpymaster = null;
+      }
+    } else {
+      if (player.team === 'red' && !gameState.redSpymaster) {
+        gameState.redSpymaster = socket.id;
+        player.spymaster = true;
+        removePendingForPlayer(socket.id);
+      } else if (player.team === 'blue' && !gameState.blueSpymaster) {
+        gameState.blueSpymaster = socket.id;
+        player.spymaster = true;
+        removePendingForPlayer(socket.id);
+      }
     }
 
     io.emit('playerUpdate', Object.values(gameState.players));
-    broadcastGameState();
+    Object.keys(gameState.players).forEach(playerId => {
+      io.to(playerId).emit('gameState', getPublicGameState(playerId));
+    });
   });
 
+  // Start the game
   socket.on('startGame', () => {
-    if (gameState.gameStarted && !gameState.gameOver) return;
-    initializeGame();
-    io.emit('playerUpdate', Object.values(gameState.players));
-    broadcastGameState();
+    if (gameState.redTeam.length > 0 && gameState.blueTeam.length > 0) {
+      Object.values(gameState.players).forEach(p => { p.readyNewGame = false; });
+      initializeGame();
+      io.emit('playerUpdate', Object.values(gameState.players));
+      Object.keys(gameState.players).forEach(playerId => {
+        io.to(playerId).emit('gameState', getPublicGameState(playerId));
+      });
+    }
   });
 
+  // Spymaster gives a clue
   socket.on('giveClue', ({ word, number }) => {
     const player = gameState.players[socket.id];
     if (!player || !player.spymaster || player.team !== gameState.currentTeam) return;
-    if (!gameState.gameStarted || gameState.gameOver || gameState.currentClue) return;
+    if (!gameState.gameStarted || gameState.gameOver) return;
 
-    const parsedNum = parseInt(number, 10) || 1;
-    gameState.currentClue = { word: String(word).toUpperCase(), number: parsedNum };
-    gameState.guessesRemaining = parsedNum + 1;
+    gameState.currentClue = { word: word.toUpperCase(), number: parseInt(number) };
+    gameState.guessesRemaining = parseInt(number) + 1;
     gameState.pendingGuesses = {};
 
     startTurnTimer('operative');
-    broadcastGameState();
+
+    Object.keys(gameState.players).forEach(playerId => {
+      io.to(playerId).emit('gameState', getPublicGameState(playerId));
+    });
   });
 
+  // Operative proposes a guess (requires unanimous confirmation if team has > 2 players)
   socket.on('proposeGuess', (wordIndex) => {
     const player = gameState.players[socket.id];
     if (!player || player.spymaster || player.team !== gameState.currentTeam) return;
     if (!gameState.gameStarted || gameState.gameOver || !gameState.currentClue) return;
+    if (gameState.words[wordIndex].revealed) return;
 
-    const operatives = Object.values(gameState.players).filter(
-      p => p.team === gameState.currentTeam && !p.spymaster
-    );
+    const teamMemberIds = player.team === 'red' ? gameState.redTeam : gameState.blueTeam;
+    const teamSize = teamMemberIds.length;
+    const nonSpymasterIds = teamMemberIds.filter(id => {
+      const p = gameState.players[id];
+      return p && !p.spymaster;
+    });
 
-    if (operatives.length <= 1) {
+    if (teamSize <= 2) {
       resolveGuess(wordIndex);
-      broadcastGameState();
+      Object.keys(gameState.players).forEach(playerId => {
+        io.to(playerId).emit('gameState', getPublicGameState(playerId));
+      });
       return;
     }
 
-    removePendingForPlayer(socket.id);
     if (!gameState.pendingGuesses[wordIndex]) {
       gameState.pendingGuesses[wordIndex] = [];
     }
-    gameState.pendingGuesses[wordIndex].push(socket.id);
 
-    if (gameState.pendingGuesses[wordIndex].length >= operatives.length) {
+    const idx = gameState.pendingGuesses[wordIndex].indexOf(socket.id);
+    if (idx !== -1) {
+      gameState.pendingGuesses[wordIndex].splice(idx, 1);
+    } else {
+      Object.keys(gameState.pendingGuesses).forEach(k => {
+        if (parseInt(k) !== wordIndex) {
+          gameState.pendingGuesses[k] = (gameState.pendingGuesses[k] || []).filter(id => id !== socket.id);
+        }
+      });
+      gameState.pendingGuesses[wordIndex].push(socket.id);
+    }
+
+    const confirmedIds = gameState.pendingGuesses[wordIndex] || [];
+    const allConfirmed = nonSpymasterIds.length > 0 && nonSpymasterIds.every(id => confirmedIds.includes(id));
+
+    if (allConfirmed) {
       resolveGuess(wordIndex);
     }
-    broadcastGameState();
+
+    Object.keys(gameState.players).forEach(playerId => {
+      io.to(playerId).emit('gameState', getPublicGameState(playerId));
+    });
   });
 
+  // Backward-compatible direct guess handler
   socket.on('guess', (wordIndex) => {
     const player = gameState.players[socket.id];
     if (!player || player.spymaster || player.team !== gameState.currentTeam) return;
     if (!gameState.gameStarted || gameState.gameOver || !gameState.currentClue) return;
+    if (gameState.words[wordIndex].revealed) return;
 
     resolveGuess(wordIndex);
-    broadcastGameState();
+
+    Object.keys(gameState.players).forEach(playerId => {
+      io.to(playerId).emit('gameState', getPublicGameState(playerId));
+    });
   });
 
+  // End turn manually
   socket.on('endTurn', () => {
     const player = gameState.players[socket.id];
     if (!player || player.spymaster || player.team !== gameState.currentTeam) return;
-    if (!gameState.gameStarted || gameState.gameOver || !gameState.currentClue) return;
+    if (!gameState.gameStarted || gameState.gameOver) return;
 
     gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
     gameState.guessesRemaining = 0;
@@ -401,47 +514,73 @@ io.on('connection', (socket) => {
     gameState.pendingGuesses = {};
 
     startTurnTimer('spymaster');
-    broadcastGameState();
-  });
 
-  socket.on('teamMessage', (text) => {
-    const player = gameState.players[socket.id];
-    if (!player || player.spymaster || !player.team) return;
-    io.emit('teamMessage', {
-      team: player.team,
-      from: player.name,
-      text: String(text || '').slice(0, 300)
+    Object.keys(gameState.players).forEach(playerId => {
+      io.to(playerId).emit('gameState', getPublicGameState(playerId));
     });
   });
 
+  // Team chat message
+  socket.on('teamMessage', (text) => {
+    const player = gameState.players[socket.id];
+    if (!player || !player.team || player.spymaster) return;
+    if (!text || typeof text !== 'string') return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const msg = {
+      from: player.name,
+      team: player.team,
+      text: trimmed.slice(0, 500),
+      time: Date.now()
+    };
+
+    const recipients = player.team === 'red' ? gameState.redTeam : gameState.blueTeam;
+    recipients.forEach(id => {
+      io.to(id).emit('teamMessage', msg);
+    });
+  });
+
+  // Player marks ready for a new game
   socket.on('playerReadyNewGame', () => {
     const player = gameState.players[socket.id];
     if (!player) return;
+
     player.readyNewGame = true;
     io.emit('playerUpdate', Object.values(gameState.players));
 
-    const allPlayers = Object.values(gameState.players);
-    if (allPlayers.length > 0 && allPlayers.every(p => p.readyNewGame)) {
-      allPlayers.forEach(p => { p.readyNewGame = false; });
+    const allIds = Object.keys(gameState.players);
+    if (allIds.length > 0 && allIds.every(id => gameState.players[id].readyNewGame)) {
+      allIds.forEach(id => { gameState.players[id].readyNewGame = false; });
       initializeGame();
       io.emit('playerUpdate', Object.values(gameState.players));
-      broadcastGameState();
+      Object.keys(gameState.players).forEach(playerId => {
+        io.to(playerId).emit('gameState', getPublicGameState(playerId));
+      });
     }
   });
 
+  // Player disconnects
   socket.on('disconnect', () => {
     const player = gameState.players[socket.id];
     if (player) {
       removeFromTeamArray(socket.id, player.team);
       removePendingForPlayer(socket.id);
-      if (gameState.redSpymaster === socket.id) gameState.redSpymaster = null;
-      if (gameState.blueSpymaster === socket.id) gameState.blueSpymaster = null;
+
+      if (gameState.redSpymaster === socket.id) {
+        gameState.redSpymaster = null;
+      }
+      if (gameState.blueSpymaster === socket.id) {
+        gameState.blueSpymaster = null;
+      }
+
       delete gameState.players[socket.id];
       io.emit('playerUpdate', Object.values(gameState.players));
     }
+    console.log('User disconnected:', socket.id);
   });
 });
 
-http.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+http.listen(PORT, () => {
+  console.log(`Codenames server running on port ${PORT}`);
 });
