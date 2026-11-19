@@ -46,6 +46,7 @@
 
         .word-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:10px; }
         .word-card { position:relative; aspect-ratio:1.2; display:flex; align-items:center; justify-content:center; background:#f0f0f0; border:2px solid #ddd; border-radius:8px; cursor:pointer; font-weight:bold; text-align:center; padding:6px; min-height:60px; user-select:none; }
+        .word-card.voted-by-me { border-color: #f39c12; box-shadow: 0 0 8px rgba(243, 156, 18, 0.6); }
         .word-card.revealed.red, .word-card.spymaster-red { background:#e74c3c; color:white; border-color:#c0392b; }
         .word-card.revealed.blue, .word-card.spymaster-blue { background:#3498db; color:white; border-color:#2980b9; }
         .word-card.revealed.neutral, .word-card.spymaster-neutral { background:#95a5a6; color:white; border-color:#7f8c8d; }
@@ -133,9 +134,9 @@
 
             <!-- Center: Board -->
             <div class="board-container panel">
-                <div id="gameNotStarted" style="text-align:center; padding:30px; color:#999;">
-                    <h2 style="font-size:1.3em;">Waiting for game to start...</h2>
-                    <p>Select your team and click "Start Game" when ready!</p>
+                <div id="gameNotStarted" style="text-align:center; padding:30px; color:#555;">
+                    <h2 style="font-size:1.3em; margin-bottom:8px;">Ready for the Next Round!</h2>
+                    <p>Teams are preserved. Select a new <strong>Spymaster</strong> for each team, then click <strong>Start Game</strong>!</p>
                 </div>
 
                 <div id="gameBoard" style="display:none;">
@@ -204,8 +205,8 @@
                         <p><strong>Gameplay:</strong></p>
                         <ul style="margin-left:16px;">
                             <li>Spymaster gives one-word clues + a number</li>
-                            <li>Operatives discuss then click a word to propose a guess</li>
-                            <li>If a team has &gt;2 players, all non-spymaster players on that team must click the same word to confirm the guess</li>
+                            <li>Operatives can vote on up to <strong>Clue Number + 1</strong> tiles at once</li>
+                            <li>If a team has &gt;2 players, all operatives must agree on a tile to flip it</li>
                             <li>Red has 9 words, Blue has 8</li>
                             <li style="color: maroon; font-weight: bold;">AVOID THE HIDDEN ASSASSIN - The Team who finds the assassin loses automatically</li>
                         </ul>
@@ -275,6 +276,9 @@
         }
 
         function updateTimerDisplay(data) {
+            // Do not display or play ticks unless a game is actively running
+            if (!currentGameState || !currentGameState.gameStarted || currentGameState.gameOver) return;
+
             const box = document.getElementById('timerBox');
             const phaseEl = document.getElementById('timerPhase');
             const digitsEl = document.getElementById('timerDigits');
@@ -325,7 +329,7 @@
             if (joinBtn) joinBtn.disabled = true;
 
             try {
-                socket.emit('join', name);
+                socket.emit('join', { name });
             } catch (err) {
                 showJoinError('Network/socket error. Check console.');
                 if (joinBtn) joinBtn.disabled = false;
@@ -366,9 +370,23 @@
             if (btn) btn.disabled = true;
             socket.emit('playerReadyNewGame');
         }
+
         // ---- SOCKET LISTENERS ----
         socket.on('connect', () => {
             console.log('socket connected', socket.id);
+
+            // Auto-restore session if returning from victory.html for the next round
+            const urlParams = new URLSearchParams(window.location.search);
+            const savedName = localStorage.getItem('codenames_playerName');
+            const savedTeam = localStorage.getItem('codenames_playerTeam');
+
+            if (urlParams.get('nextRound') === '1' && savedName) {
+                socket.emit('join', { name: savedName, team: savedTeam });
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('gameScreen').style.display = 'grid';
+                // Clean query param from URL
+                window.history.replaceState({}, document.title, '/');
+            }
         });
 
         socket.on('connect_error', (err) => {
@@ -381,6 +399,7 @@
         });
 
         socket.on('turnTimeout', (data) => {
+            if (!currentGameState || !currentGameState.gameStarted || currentGameState.gameOver) return;
             playFamilyFeudBuzzer();
             const overlay = document.getElementById('timeoutOverlay');
             const strikeText = document.getElementById('strikeText');
@@ -473,6 +492,10 @@
                     card.textContent = w.word;
 
                     if (!w.revealed && w.pendingConfirmations && w.pendingConfirmations.length > 0) {
+                        if (myPlayer && w.pendingConfirmations.includes(myPlayer.name)) {
+                            card.classList.add('voted-by-me');
+                        }
+
                         const countBadge = document.createElement('span');
                         countBadge.className = 'pending-count';
                         countBadge.textContent = w.pendingConfirmations.length;
