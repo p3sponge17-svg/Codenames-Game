@@ -7,11 +7,11 @@
     <script src="/socket.io/socket.io.js"></script>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg,#667eea 0%,#764ba2 100%); height:100vh; padding:10px; }
-        .container { max-width:1600px; margin:0 auto; height:100%; display:flex; flex-direction:column; }
-        h1 { text-align:center; color:white; margin:5px 0 10px; font-size:2em; text-shadow:2px 2px 4px rgba(0,0,0,0.3); }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg,#667eea 0%,#764ba2 100%); min-height:100vh; padding:10px; }
+        .container { max-width:1600px; margin:0 auto; min-height:calc(100vh - 20px); display:flex; flex-direction:column; }
+        h1 { text-align:center; color:white; margin:5px 0 10px; font-size:1.8em; text-shadow:2px 2px 4px rgba(0,0,0,0.3); }
 
-        .game-layout { display:grid; grid-template-columns: 300px 1fr 300px; gap:10px; height:100%; }
+        .game-layout { display:grid; grid-template-columns: 300px 1fr 300px; gap:10px; flex:1; }
         .panel { background:white; border-radius:10px; padding:12px; box-shadow:0 5px 15px rgba(0,0,0,0.2); overflow:auto; display:flex; flex-direction:column; }
         .panel h3 { margin-bottom:8px; font-size:1.05em; color:#333; border-bottom:2px solid #eee; padding-bottom:8px; }
 
@@ -33,7 +33,7 @@
         .start-button { width:100%; padding:10px; background:#27ae60; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; }
 
         .board-container { background:white; border-radius:10px; padding:12px; box-shadow:0 5px 15px rgba(0,0,0,0.2); display:flex; flex-direction:column; }
-        .game-info { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:10px; background:#f8f9fa; border-radius:8px; }
+        .game-info { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px; padding:10px; background:#f8f9fa; border-radius:8px; }
         .turn-indicator.red { color:#e74c3c; font-weight:bold; }
         .turn-indicator.blue { color:#3498db; font-weight:bold; }
 
@@ -45,20 +45,20 @@
         .clue-display { text-align:center; padding:10px; background:#fff3cd; border-radius:6px; margin-bottom:10px; font-weight:bold; }
 
         .word-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:10px; }
-        .word-card { position:relative; aspect-ratio:1.2; display:flex; align-items:center; justify-content:center; background:#f0f0f0; border:2px solid #ddd; border-radius:8px; cursor:pointer; font-weight:bold; text-align:center; padding:6px; min-height:60px; user-select:none; }
+        .word-card { position:relative; aspect-ratio:1.2; display:flex; align-items:center; justify-content:center; background:#f0f0f0; border:2px solid #ddd; border-radius:8px; cursor:pointer; font-weight:bold; text-align:center; padding:6px; min-height:60px; user-select:none; word-break:break-word; }
         .word-card.voted-by-me { border-color: #f39c12; box-shadow: 0 0 8px rgba(243, 156, 18, 0.6); }
         .word-card.revealed.red, .word-card.spymaster-red { background:#e74c3c; color:white; border-color:#c0392b; }
         .word-card.revealed.blue, .word-card.spymaster-blue { background:#3498db; color:white; border-color:#2980b9; }
         .word-card.revealed.neutral, .word-card.spymaster-neutral { background:#95a5a6; color:white; border-color:#7f8c8d; }
         .word-card.revealed.assassin, .word-card.spymaster-assassin { background:#2c3e50; color:white; border-color:#1a252f; }
 
-        .pending-names { position:absolute; bottom:4px; left:4px; right:4px; font-size:0.6em; color:#222; background:rgba(255,255,255,0.85); padding:2px 4px; border-radius:4px; text-align:center; }
-        .pending-count { position:absolute; top:4px; right:6px; font-size:0.65em; color:#222; background:rgba(255,255,255,0.9); padding:2px 6px; border-radius:6px; }
+        .pending-names { position:absolute; bottom:3px; left:3px; right:3px; font-size:0.6em; color:#222; background:rgba(255,255,255,0.9); padding:2px 3px; border-radius:4px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .pending-count { position:absolute; top:3px; right:4px; font-size:0.65em; color:#222; background:rgba(255,255,255,0.9); padding:1px 5px; border-radius:6px; }
 
         .chat { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
-        .chat-messages { flex:1; background:#fafafa; border:1px solid #eee; border-radius:6px; padding:8px; overflow:auto; max-height:240px; }
+        .chat-messages { flex:1; background:#fafafa; border:1px solid #eee; border-radius:6px; padding:8px; overflow:auto; max-height:200px; min-height:80px; }
         .chat-input { display:flex; gap:6px; margin-top:6px; }
-        .chat-input input { flex:1; padding:8px; border-radius:6px; border:1px solid #ddd; }
+        .chat-input input { flex:1; padding:8px; border-radius:6px; border:1px solid #ddd; min-width:0; }
         .chat-input button { padding:8px 12px; border-radius:6px; border:none; background:#3498db; color:white; cursor:pointer; }
 
         .new-game-button { width:100%; padding:8px; background:#9b59b6; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; }
@@ -68,16 +68,27 @@
         .timer-box.red { border-color: #e74c3c; background: #fdf2f2; }
         .timer-box.blue { border-color: #3498db; background: #f0f8ff; }
         .timer-phase { font-size: 0.85em; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; color: #444; margin-bottom: 4px; }
-        .timer-digits { font-size: 2.8em; font-weight: 800; font-variant-numeric: tabular-nums; color: #2c3e50; line-height: 1.1; }
+        .timer-digits { font-size: 2.6em; font-weight: 800; font-variant-numeric: tabular-nums; color: #2c3e50; line-height: 1.1; }
         .timer-digits.urgent { color: #c0392b; animation: pulseUrgent 0.6s infinite alternate; }
         @keyframes pulseUrgent { from { transform: scale(1); } to { transform: scale(1.08); } }
 
-        #timeoutOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; pointer-events: none; }
-        .strike-xes { font-size: 8rem; font-weight: 900; color: #ff2a2a; letter-spacing: 24px; text-shadow: 0 0 35px rgba(255, 0, 0, 0.9); line-height: 1; }
-        .strike-text { font-size: 2.4rem; font-weight: 800; color: white; margin-top: 18px; text-transform: uppercase; letter-spacing: 2px; text-align: center; }
+        #timeoutOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; pointer-events: none; padding: 20px; }
+        .strike-xes { font-size: 5rem; font-weight: 900; color: #ff2a2a; letter-spacing: 16px; text-shadow: 0 0 35px rgba(255, 0, 0, 0.9); line-height: 1; }
+        .strike-text { font-size: 1.8rem; font-weight: 800; color: white; margin-top: 18px; text-transform: uppercase; letter-spacing: 2px; text-align: center; }
 
-        @media (max-width:1200px) {
+        @media (max-width:1100px) {
             .game-layout { grid-template-columns: 1fr; }
+            .board-container { order: -1; }
+        }
+
+        @media (max-width:600px) {
+            body { padding: 6px; }
+            h1 { font-size: 1.4em; }
+            .word-grid { gap: 4px; }
+            .word-card { aspect-ratio: auto; min-height: 54px; font-size: 0.72rem; padding: 4px 2px; }
+            .pending-names { font-size: 0.55rem; }
+            .strike-xes { font-size: 3.5rem; letter-spacing: 10px; }
+            .strike-text { font-size: 1.3rem; }
         }
     </style>
 </head>
@@ -276,7 +287,6 @@
         }
 
         function updateTimerDisplay(data) {
-            // Do not display or play ticks unless a game is actively running
             if (!currentGameState || !currentGameState.gameStarted || currentGameState.gameOver) return;
 
             const box = document.getElementById('timerBox');
@@ -368,23 +378,26 @@
             requestedNewGame = true;
             const btn = document.getElementById('newGameButton');
             if (btn) btn.disabled = true;
-            socket.emit('playerReadyNewGame');
+            socket.emit('playerReadyNewGame', {
+                name: (myPlayer && myPlayer.name) || localStorage.getItem('codenames_playerName') || '',
+                team: (myPlayer && myPlayer.team) || localStorage.getItem('codenames_playerTeam') || ''
+            });
         }
 
         // ---- SOCKET LISTENERS ----
         socket.on('connect', () => {
             console.log('socket connected', socket.id);
 
-            // Auto-restore session if returning from victory.html for the next round
             const urlParams = new URLSearchParams(window.location.search);
-            const savedName = localStorage.getItem('codenames_playerName');
-            const savedTeam = localStorage.getItem('codenames_playerTeam');
+            const savedName = urlParams.get('me') || localStorage.getItem('codenames_playerName');
+            const savedTeam = urlParams.get('team') || localStorage.getItem('codenames_playerTeam');
 
             if (urlParams.get('nextRound') === '1' && savedName) {
+                localStorage.setItem('codenames_playerName', savedName);
+                if (savedTeam) localStorage.setItem('codenames_playerTeam', savedTeam);
                 socket.emit('join', { name: savedName, team: savedTeam });
                 document.getElementById('loginScreen').style.display = 'none';
                 document.getElementById('gameScreen').style.display = 'grid';
-                // Clean query param from URL
                 window.history.replaceState({}, document.title, '/');
             }
         });
@@ -526,7 +539,9 @@
                     const winnersParam = encodeURIComponent(winners.join(','));
                     const reason = encodeURIComponent(state.winReason || '');
                     const winnerTeam = encodeURIComponent(state.winner || '');
-                    window.location.href = `/victory.html?reason=${reason}&winner=${winnerTeam}&winners=${winnersParam}`;
+                    const myNameParam = encodeURIComponent((myPlayer && myPlayer.name) || localStorage.getItem('codenames_playerName') || '');
+                    const myTeamParam = encodeURIComponent((myPlayer && myPlayer.team) || localStorage.getItem('codenames_playerTeam') || '');
+                    window.location.href = `/victory.html?reason=${reason}&winner=${winnerTeam}&winners=${winnersParam}&me=${myNameParam}&team=${myTeamParam}`;
                 }
             } else {
                 redirectedToVictory = false;

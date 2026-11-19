@@ -277,13 +277,15 @@
       .then(data => renderLeaderboard(data.matchHistory, data.redWinsTotal, data.blueWinsTotal))
       .catch(() => {});
 
-    // Socket handling
+    // Read identity from URL params first, falling back to localStorage
+    const storedName = params.me || localStorage.getItem('codenames_playerName') || '';
+    const storedTeam = params.team || localStorage.getItem('codenames_playerTeam') || null;
+    if (storedName) localStorage.setItem('codenames_playerName', storedName);
+    if (storedTeam) localStorage.setItem('codenames_playerTeam', storedTeam);
+
     const socket = io();
     let amReady = false;
     let playersState = [];
-
-    const storedName = localStorage.getItem('codenames_playerName') || '';
-    const storedTeam = localStorage.getItem('codenames_playerTeam') || null;
 
     socket.on('connect', () => {
       if (storedName) {
@@ -295,16 +297,33 @@
       if (amReady) return;
       amReady = true;
       readyBtn.disabled = true;
-      socket.emit('playerReadyNewGame');
+      // Pass name & team directly so server registers the player even on slow mobile connections
+      socket.emit('playerReadyNewGame', { name: storedName, team: storedTeam });
       youStatus.textContent = 'You are ready. Waiting for others...';
       readyListDiv.style.display = 'block';
     });
 
     function updateReadyList(players) {
       playersState = players || [];
-      const readyNames = playersState.filter(p => p.readyNewGame).map(p => p.name);
-      readyNamesSpan.textContent = readyNames.length === 0 ? 'No players ready yet' : readyNames.join(', ');
-      readyListDiv.style.display = (readyNames.length > 0 || amReady) ? 'block' : 'none';
+      const readyPlayers = playersState.filter(p => p.readyNewGame);
+      const pendingPlayers = playersState.filter(p => !p.readyNewGame);
+
+      if (readyPlayers.length === 0) {
+        readyNamesSpan.textContent = 'No players ready yet';
+      } else {
+        const readyText = readyPlayers.map(p => p.name).join(', ');
+        const waitingText = pendingPlayers.length > 0
+          ? ` | Still waiting on: ${pendingPlayers.map(p => p.name).join(', ')}`
+          : '';
+        readyNamesSpan.textContent = `${readyText} (${readyPlayers.length}/${playersState.length})${waitingText}`;
+      }
+      readyListDiv.style.display = (readyPlayers.length > 0 || amReady) ? 'block' : 'none';
+    }
+
+    function goBackToLobby() {
+      const meParam = encodeURIComponent(storedName);
+      const teamParam = encodeURIComponent(storedTeam || '');
+      window.location.href = `/?nextRound=1&me=${meParam}&team=${teamParam}`;
     }
 
     socket.on('playerUpdate', (players) => {
@@ -318,14 +337,13 @@
         renderLeaderboard(state.matchHistory, state.redWinsTotal, state.blueWinsTotal);
       }
 
-      // If server reset to lobby (gameStarted false & gameOver false), return to index with nextRound=1
       if (!state.gameStarted && !state.gameOver) {
-        window.location.href = '/?nextRound=1';
+        goBackToLobby();
       }
     });
 
     socket.on('returnToLobby', () => {
-      window.location.href = '/?nextRound=1';
+      goBackToLobby();
     });
   </script>
 </body>
