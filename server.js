@@ -83,7 +83,6 @@ let gameState = {
   turnPhase: 'spymaster'
 };
 
-// Endpoint for victory.html to fetch leaderboard immediately on load
 app.get('/api/history', (req, res) => {
   res.json({
     matchHistory,
@@ -161,23 +160,19 @@ function recordMatchResult(winner, reason) {
   if (winner === 'red') redWinsTotal++;
   if (winner === 'blue') blueWinsTotal++;
 
-  const redSpyName = gameState.redSpymaster && gameState.players[gameState.redSpymaster]
-    ? gameState.players[gameState.redSpymaster].name
-    : 'None';
-  const blueSpyName = gameState.blueSpymaster && gameState.players[gameState.blueSpymaster]
-    ? gameState.players[gameState.blueSpymaster].name
+  const winningSpyId = winner === 'red' ? gameState.redSpymaster : gameState.blueSpymaster;
+  const winningSpyName = winningSpyId && gameState.players[winningSpyId]
+    ? gameState.players[winningSpyId].name
     : 'None';
 
   matchHistory.push({
     round: matchHistory.length + 1,
     winner,
     reason,
-    redSpymaster: redSpyName,
-    blueSpymaster: blueSpyName
+    spymaster: winningSpyName
   });
 }
 
-// Reset board back to lobby while keeping teams intact so new Spymasters can be chosen
 function resetToLobby() {
   stopTurnTimer();
   gameState.words = [];
@@ -195,7 +190,6 @@ function resetToLobby() {
   gameState.timeRemaining = SPYMASTER_TIME;
   gameState.turnPhase = 'spymaster';
 
-  // Clear old spymasters so new spymasters can claim the role for the next round
   gameState.redSpymaster = null;
   gameState.blueSpymaster = null;
   Object.values(gameState.players).forEach(p => {
@@ -305,6 +299,19 @@ function removePendingForPlayer(socketId) {
   });
 }
 
+function switchTurnToOtherTeam(reason) {
+  gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
+  gameState.guessesRemaining = 0;
+  gameState.currentClue = null;
+  gameState.pendingGuesses = {};
+  startTurnTimer('spymaster');
+
+  io.emit('turnChange', {
+    nextTeam: gameState.currentTeam,
+    reason
+  });
+}
+
 function resolveGuess(wordIndex) {
   const word = gameState.words[wordIndex];
   if (!word || word.revealed) return;
@@ -342,22 +349,13 @@ function resolveGuess(wordIndex) {
 
   if (!gameState.gameOver) {
     if (word.type !== gameState.currentTeam) {
-      gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
-      gameState.guessesRemaining = 0;
-      gameState.currentClue = null;
-      gameState.pendingGuesses = {};
-      startTurnTimer('spymaster');
+      switchTurnToOtherTeam('wrongGuess');
     } else {
       gameState.guessesRemaining--;
-      // Remove the revealed word from pendingGuesses, keep any remaining votes intact
       delete gameState.pendingGuesses[wordIndex];
 
       if (gameState.guessesRemaining <= 0) {
-        gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
-        gameState.guessesRemaining = 0;
-        gameState.currentClue = null;
-        gameState.pendingGuesses = {};
-        startTurnTimer('spymaster');
+        switchTurnToOtherTeam('outOfGuesses');
       }
     }
   } else {
@@ -368,12 +366,10 @@ function resolveGuess(wordIndex) {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  // Player joins game (or restores session after returning from victory.html)
   socket.on('join', (payload) => {
     const playerName = typeof payload === 'string' ? payload : (payload && payload.name) || 'Player';
     const preferredTeam = typeof payload === 'object' && payload ? payload.team : null;
 
-    // Clean up any stale socket with the same name
     Object.keys(gameState.players).forEach(existingId => {
       const p = gameState.players[existingId];
       if (p && p.name === playerName && existingId !== socket.id) {
@@ -400,10 +396,11 @@ io.on('connection', (socket) => {
     };
 
     io.emit('playerUpdate', Object.values(gameState.players));
-    socket.emit('gameState', getPublicGameState(socket.id));
+    Object.keys(gameState.players).forEach(playerId => {
+      io.to(playerId).emit('gameState', getPublicGameState(playerId));
+    });
   });
 
-  // Rejoin handler used while on victory.html
   socket.on('rejoin', (payload) => {
     const { name, team } = payload || {};
     let assignedTeam = team;
@@ -491,13 +488,24 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Only allow starting once both teams have players AND both Spymasters are selected
   socket.on('startGame', () => {
-    if (gameState.redTeam.length > 0 && gameState.blueTeam.length > 0) {
+    const canStart =
+      gameState.redTeam.length > 0 &&
+      gameState.blueTeam.length > 0 &&
+      Boolean(gameState.redSpymaster) &&
+      Boolean(gameState.blueSpymaster);
+
+    if (canStart) {
       Object.values(gameState.players).forEach(p => { p.readyNewGame = false; });
       initializeGame();
       io.emit('playerUpdate', Object.values(gameState.players));
       Object.keys(gameState.players).forEach(playerId => {
         io.to(playerId).emit('gameState', getPublicGameState(playerId));
+      });
+      io.emit('turnChange', {
+        nextTeam: gameState.currentTeam,
+        reason: 'gameStart'
       });
     }
   });
@@ -518,7 +526,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Multi-vote operative proposal: players can vote on up to guessesRemaining (clue + 1) tiles
   socket.on('proposeGuess', (wordIndex) => {
     const player = gameState.players[socket.id];
     if (!player || player.spymaster || player.team !== gameState.currentTeam) return;
@@ -532,7 +539,6 @@ io.on('connection', (socket) => {
       return p && !p.spymaster;
     });
 
-    // If 2 or fewer players on the team (only 1 operative), resolve immediately
     if (teamSize <= 2) {
       resolveGuess(wordIndex);
       Object.keys(gameState.players).forEach(playerId => {
@@ -547,10 +553,8 @@ io.on('connection', (socket) => {
 
     const idx = gameState.pendingGuesses[wordIndex].indexOf(socket.id);
     if (idx !== -1) {
-      // Toggle vote OFF if already selected
       gameState.pendingGuesses[wordIndex].splice(idx, 1);
     } else {
-      // Count how many unrevealed tiles this player has currently voted for
       let playerCurrentVotes = 0;
       Object.keys(gameState.pendingGuesses).forEach(k => {
         const wIdx = parseInt(k);
@@ -561,7 +565,6 @@ io.on('connection', (socket) => {
         }
       });
 
-      // Enforce max votes equal to guessesRemaining (clue number + 1)
       if (playerCurrentVotes >= gameState.guessesRemaining) {
         return;
       }
@@ -569,7 +572,6 @@ io.on('connection', (socket) => {
       gameState.pendingGuesses[wordIndex].push(socket.id);
     }
 
-    // Check if all operatives on the team have agreed on this tile
     const confirmedIds = gameState.pendingGuesses[wordIndex] || [];
     const allConfirmed = nonSpymasterIds.length > 0 && nonSpymasterIds.every(id => confirmedIds.includes(id));
 
@@ -600,12 +602,7 @@ io.on('connection', (socket) => {
     if (!player || player.spymaster || player.team !== gameState.currentTeam) return;
     if (!gameState.gameStarted || gameState.gameOver) return;
 
-    gameState.currentTeam = gameState.currentTeam === 'red' ? 'blue' : 'red';
-    gameState.guessesRemaining = 0;
-    gameState.currentClue = null;
-    gameState.pendingGuesses = {};
-
-    startTurnTimer('spymaster');
+    switchTurnToOtherTeam('endTurn');
 
     Object.keys(gameState.players).forEach(playerId => {
       io.to(playerId).emit('gameState', getPublicGameState(playerId));
@@ -632,11 +629,9 @@ io.on('connection', (socket) => {
     });
   });
 
-  // When all players click Start New Game, return to lobby with teams preserved & timer stopped
   socket.on('playerReadyNewGame', (payload) => {
     let player = gameState.players[socket.id];
 
-    // Self-heal: if socket reconnected on victory.html without finishing 'rejoin', register them now
     if (!player && payload && payload.name) {
       const assignedTeam = (payload.team === 'red' || payload.team === 'blue')
         ? payload.team
@@ -695,6 +690,9 @@ io.on('connection', (socket) => {
 
       delete gameState.players[socket.id];
       io.emit('playerUpdate', Object.values(gameState.players));
+      Object.keys(gameState.players).forEach(playerId => {
+        io.to(playerId).emit('gameState', getPublicGameState(playerId));
+      });
     }
     console.log('User disconnected:', socket.id);
   });

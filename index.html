@@ -30,7 +30,9 @@
         .team-buttons button.blue { background:#3498db; }
 
         .spymaster-button { width:100%; padding:8px; background:gold; border:none; border-radius:6px; font-weight:bold; cursor:pointer; margin-bottom:8px; }
-        .start-button { width:100%; padding:10px; background:#27ae60; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; }
+        .start-button { width:100%; padding:10px; background:#27ae60; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; transition: background 0.2s ease; }
+        .start-button:disabled { background:#95a5a6; color:#ecf0f1; cursor:not-allowed; opacity:0.75; }
+        .start-status-note { font-size:0.82em; color:#c0392b; font-weight:600; text-align:center; margin-top:6px; min-height:1.1em; }
 
         .board-container { background:white; border-radius:10px; padding:12px; box-shadow:0 5px 15px rgba(0,0,0,0.2); display:flex; flex-direction:column; }
         .game-info { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px; padding:10px; background:#f8f9fa; border-radius:8px; }
@@ -63,7 +65,7 @@
 
         .new-game-button { width:100%; padding:8px; background:#9b59b6; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; }
 
-        /* Timer Box & Timeout Overlay */
+        /* Timer Box & Overlays */
         .timer-box { margin-top: 14px; padding: 14px; border-radius: 10px; text-align: center; background: #f8f9fa; border: 3px solid #ddd; transition: all 0.3s ease; }
         .timer-box.red { border-color: #e74c3c; background: #fdf2f2; }
         .timer-box.blue { border-color: #3498db; background: #f0f8ff; }
@@ -75,6 +77,16 @@
         #timeoutOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; pointer-events: none; padding: 20px; }
         .strike-xes { font-size: 5rem; font-weight: 900; color: #ff2a2a; letter-spacing: 16px; text-shadow: 0 0 35px rgba(255, 0, 0, 0.9); line-height: 1; }
         .strike-text { font-size: 1.8rem; font-weight: 800; color: white; margin-top: 18px; text-transform: uppercase; letter-spacing: 2px; text-align: center; }
+
+        /* Turn Change Announcement Overlay */
+        #turnChangeOverlay { position: fixed; inset: 0; background: rgba(15, 20, 35, 0.84); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 9998; pointer-events: none; padding: 24px; }
+        .turn-banner { padding: 28px 42px; border-radius: 16px; text-align: center; border: 4px solid white; box-shadow: 0 12px 40px rgba(0,0,0,0.6); animation: popIn 0.25s ease-out; }
+        .turn-banner.red { background: linear-gradient(135deg, #c0392b, #e74c3c); }
+        .turn-banner.blue { background: linear-gradient(135deg, #2980b9, #3498db); }
+        .turn-banner-icon { font-size: 3rem; margin-bottom: 8px; }
+        .turn-banner-title { font-size: 2.3rem; font-weight: 900; color: white; text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+        .turn-banner-sub { font-size: 1.1rem; font-weight: 600; color: rgba(255,255,255,0.92); margin-top: 8px; }
+        @keyframes popIn { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
         @media (max-width:1100px) {
             .game-layout { grid-template-columns: 1fr; }
@@ -89,6 +101,8 @@
             .pending-names { font-size: 0.55rem; }
             .strike-xes { font-size: 3.5rem; letter-spacing: 10px; }
             .strike-text { font-size: 1.3rem; }
+            .turn-banner { padding: 20px 24px; }
+            .turn-banner-title { font-size: 1.5rem; }
         }
     </style>
 </head>
@@ -132,7 +146,8 @@
                 </div>
 
                 <div style="margin-top:10px;">
-                    <button class="start-button" id="startButton" onclick="startGame()">Start Game</button>
+                    <button class="start-button" id="startButton" onclick="startGame()" disabled>Start Game</button>
+                    <div id="startStatusNote" class="start-status-note">Awaiting Red &amp; Blue Spymasters</div>
                 </div>
 
                 <!-- Predominant Turn Timer Box -->
@@ -146,8 +161,8 @@
             <!-- Center: Board -->
             <div class="board-container panel">
                 <div id="gameNotStarted" style="text-align:center; padding:30px; color:#555;">
-                    <h2 style="font-size:1.3em; margin-bottom:8px;">Ready for the Next Round!</h2>
-                    <p>Teams are preserved. Select a new <strong>Spymaster</strong> for each team, then click <strong>Start Game</strong>!</p>
+                    <h2 style="font-size:1.3em; margin-bottom:8px;">Waiting for Game Setup</h2>
+                    <p>Select a <strong>Spymaster</strong> for both Red and Blue teams, then click <strong>Start Game</strong>!</p>
                 </div>
 
                 <div id="gameBoard" style="display:none;">
@@ -232,14 +247,25 @@
         <div class="strike-xes">X X X</div>
         <div id="strikeText" class="strike-text">TIME'S UP! OTHER TEAM'S TURN</div>
     </div>
+
+    <!-- Turn Change Announcement Overlay -->
+    <div id="turnChangeOverlay">
+        <div id="turnBanner" class="turn-banner blue">
+            <div class="turn-banner-icon">👑⏱️</div>
+            <div id="turnBannerTitle" class="turn-banner-title">BLUE TEAM SPYMASTER ON THE CLOCK</div>
+            <div id="turnBannerSub" class="turn-banner-sub">90 seconds to give a clue!</div>
+        </div>
+    </div>
+
     <script>
         const socket = io();
         let myPlayer = null;
         let currentGameState = null;
         let requestedNewGame = false;
         let redirectedToVictory = false;
+        let turnOverlayTimer = null;
 
-        // ---- TIMER AUDIO & OVERLAY ----
+        // ---- TIMER AUDIO & OVERLAYS ----
         let timerMuted = false;
         let audioCtx = null;
 
@@ -266,6 +292,28 @@
             } catch (e) {}
         }
 
+        function playTurnChangeChime() {
+            if (timerMuted) return;
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const now = audioCtx.currentTime;
+                // Distinct upbeat two-note chime (C5 -> G5)
+                [523.25, 783.99].forEach((freq, i) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, now + i * 0.14);
+                    gain.gain.setValueAtTime(0.26, now + i * 0.14);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.14 + 0.35);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now + i * 0.14);
+                    osc.stop(now + i * 0.14 + 0.35);
+                });
+            } catch (e) {}
+        }
+
         function playFamilyFeudBuzzer() {
             if (timerMuted) return;
             try {
@@ -284,6 +332,25 @@
                     osc.stop(now + 0.85);
                 });
             } catch (e) {}
+        }
+
+        function showTurnChangeAnnouncement(nextTeam) {
+            const overlay = document.getElementById('turnChangeOverlay');
+            const banner = document.getElementById('turnBanner');
+            const title = document.getElementById('turnBannerTitle');
+            if (!overlay || !banner || !title) return;
+
+            const teamUpper = (nextTeam || '').toUpperCase();
+            banner.className = 'turn-banner ' + (nextTeam || 'blue');
+            title.textContent = `${teamUpper} TEAM SPYMASTER ON THE CLOCK`;
+
+            playTurnChangeChime();
+            overlay.style.display = 'flex';
+
+            if (turnOverlayTimer) clearTimeout(turnOverlayTimer);
+            turnOverlayTimer = setTimeout(() => {
+                overlay.style.display = 'none';
+            }, 3000);
         }
 
         function updateTimerDisplay(data) {
@@ -310,6 +377,42 @@
                 playTickSound(data.timeRemaining);
             } else {
                 digitsEl.classList.remove('urgent');
+            }
+        }
+
+        // Update Start Game button enabled/disabled state and awaiting status note
+        function updateStartButtonState(players) {
+            const startBtn = document.getElementById('startButton');
+            const noteEl = document.getElementById('startStatusNote');
+            if (!startBtn || !noteEl) return;
+
+            const list = players || [];
+            const hasRedSpy = list.some(p => p.team === 'red' && p.spymaster);
+            const hasBlueSpy = list.some(p => p.team === 'blue' && p.spymaster);
+            const hasRedTeam = list.some(p => p.team === 'red');
+            const hasBlueTeam = list.some(p => p.team === 'blue');
+
+            if (currentGameState && currentGameState.gameStarted && !currentGameState.gameOver) {
+                startBtn.disabled = true;
+                noteEl.textContent = '';
+                return;
+            }
+
+            if (!hasRedSpy && !hasBlueSpy) {
+                startBtn.disabled = true;
+                noteEl.textContent = 'Awaiting Red & Blue Spymasters';
+            } else if (!hasRedSpy) {
+                startBtn.disabled = true;
+                noteEl.textContent = 'Awaiting Red Team Spymaster';
+            } else if (!hasBlueSpy) {
+                startBtn.disabled = true;
+                noteEl.textContent = 'Awaiting Blue Team Spymaster';
+            } else if (!hasRedTeam || !hasBlueTeam) {
+                startBtn.disabled = true;
+                noteEl.textContent = 'Both teams need at least 1 player';
+            } else {
+                startBtn.disabled = false;
+                noteEl.textContent = '';
             }
         }
 
@@ -411,6 +514,11 @@
             updateTimerDisplay(data);
         });
 
+        socket.on('turnChange', (data) => {
+            if (!data || !data.nextTeam) return;
+            showTurnChangeAnnouncement(data.nextTeam);
+        });
+
         socket.on('turnTimeout', (data) => {
             if (!currentGameState || !currentGameState.gameStarted || currentGameState.gameOver) return;
             playFamilyFeudBuzzer();
@@ -452,6 +560,8 @@
                 if (myPlayer.name) localStorage.setItem('codenames_playerName', myPlayer.name);
                 if (myPlayer.team) localStorage.setItem('codenames_playerTeam', myPlayer.team);
             }
+
+            updateStartButtonState(players);
         });
 
         socket.on('gameState', (state) => {
@@ -459,6 +569,7 @@
             if (state.players && state.players.length) {
                 const me = state.players.find(p => p.id === socket.id);
                 if (me) myPlayer = me;
+                updateStartButtonState(state.players);
             }
 
             if (state.gameStarted && !state.gameOver) {

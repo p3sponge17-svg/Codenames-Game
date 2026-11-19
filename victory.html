@@ -181,12 +181,11 @@
                   <th>Round</th>
                   <th>Winning Team</th>
                   <th>How They Won</th>
-                  <th>Red Spymaster 👑</th>
-                  <th>Blue Spymaster 👑</th>
+                  <th>Spymaster 👑</th>
                 </tr>
               </thead>
               <tbody id="historyTableBody">
-                <tr><td colspan="5" style="text-align:center; color:#aaa;">Loading match history...</td></tr>
+                <tr><td colspan="4" style="text-align:center; color:#aaa;">Loading match history...</td></tr>
               </tbody>
             </table>
           </div>
@@ -248,20 +247,20 @@
 
       const tbody = document.getElementById('historyTableBody');
       if (!history || history.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#aaa;">No rounds recorded yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#aaa;">No rounds recorded yet.</td></tr>';
         return;
       }
 
       tbody.innerHTML = history.slice().reverse().map(item => {
         const winLabel = item.reason === 'assassin' ? 'Opponent Hit Assassin 💀' : 'Found All Words 🎯';
         const teamClass = item.winner === 'red' ? 'red' : 'blue';
+        const spyName = item.spymaster || (item.winner === 'red' ? item.redSpymaster : item.blueSpymaster) || 'None';
         return `
           <tr>
             <td><strong>#${item.round}</strong></td>
             <td><span class="team-pill ${teamClass}">${item.winner}</span></td>
             <td>${winLabel}</td>
-            <td>${escapeHtml(item.redSpymaster)}</td>
-            <td>${escapeHtml(item.blueSpymaster)}</td>
+            <td>${escapeHtml(spyName)}</td>
           </tr>
         `;
       }).join('');
@@ -271,13 +270,11 @@
       return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
-    // Fetch initial history right away
     fetch('/api/history')
       .then(r => r.json())
       .then(data => renderLeaderboard(data.matchHistory, data.redWinsTotal, data.blueWinsTotal))
       .catch(() => {});
 
-    // Read identity from URL params first, falling back to localStorage
     const storedName = params.me || localStorage.getItem('codenames_playerName') || '';
     const storedTeam = params.team || localStorage.getItem('codenames_playerTeam') || null;
     if (storedName) localStorage.setItem('codenames_playerName', storedName);
@@ -297,7 +294,6 @@
       if (amReady) return;
       amReady = true;
       readyBtn.disabled = true;
-      // Pass name & team directly so server registers the player even on slow mobile connections
       socket.emit('playerReadyNewGame', { name: storedName, team: storedTeam });
       youStatus.textContent = 'You are ready. Waiting for others...';
       readyListDiv.style.display = 'block';
